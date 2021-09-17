@@ -6,6 +6,8 @@ An iOS & SwiftUI server monitor tool for linux based machines using remote proc 
 
 Testflight may be canceled anytime in the future, make sure to backup your configuration file if needed. Join with [https://testflight.apple.com/join/UIW76yDz](https://testflight.apple.com/join/UIW76yDz)
 
+## Preview
+
 ![Preview](./Resource/Preview.png)
 
 ## Features
@@ -17,6 +19,7 @@ Testflight may be canceled anytime in the future, make sure to backup your confi
 - [x] Terminal with xterm support
 - [x] Code snippet with cancelable control
 - [x] Transferable/Extendable configuration file
+- [x] [tvOS dashboard](https://apps.apple.com/us/app/%E6%9E%95%E8%BE%B9%E8%AF%AD%E7%9C%8B%E6%9D%BF/id1565555565) available for free
 
 ## Notes
 
