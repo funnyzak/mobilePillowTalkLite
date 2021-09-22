@@ -7,6 +7,36 @@
 
 import Foundation
 
+fileprivate extension Float {
+    var safeWrapper: Float {
+        if self == .nan || self == .signalingNaN {
+            return 0
+        }
+        if self > Float(Int.max) {
+            return 0
+        }
+        if self < Float(Int.min) {
+            return 0
+        }
+        return self
+    }
+}
+
+fileprivate extension Double {
+    var safeWrapper: Double {
+        if self == .nan || self == .signalingNaN {
+            return 0
+        }
+        if self > Double(Int.max) {
+            return 0
+        }
+        if self < Double(Int.min) {
+            return 0
+        }
+        return self
+    }
+}
+
 public extension PTServerManager {
     /// 服务器结构体
     struct Server: Codable, Hashable, PTUIRepresentable {
@@ -149,11 +179,11 @@ public extension PTServerManager {
                       iowait: Float, nice: Float,
                       sum: Float)
         {
-            sumSystem = system
-            sumUser = user
-            sumIOWait = iowait
-            sumNice = nice
-            sumUsed = sum
+            sumSystem = system.safeWrapper
+            sumUser = user.safeWrapper
+            sumIOWait = iowait.safeWrapper
+            sumNice = nice.safeWrapper
+            sumUsed = sum.safeWrapper
         }
 
         public func description() -> String {
@@ -174,15 +204,15 @@ public extension PTServerManager {
         public let guest: Float
 
         internal init(user: Float, nice: Float, system: Float, idle: Float, iowait: Float, irq: Float, softIrq: Float, steal: Float, guest: Float) {
-            self.user = user
-            self.nice = nice
-            self.system = system
-            self.idle = idle
-            self.iowait = iowait
-            self.irq = irq
-            self.softIrq = softIrq
-            self.steal = steal
-            self.guest = guest
+            self.user = user.safeWrapper
+            self.nice = nice.safeWrapper
+            self.system = system.safeWrapper
+            self.idle = idle.safeWrapper
+            self.iowait = iowait.safeWrapper
+            self.irq = irq.safeWrapper
+            self.softIrq = softIrq.safeWrapper
+            self.steal = steal.safeWrapper
+            self.guest = guest.safeWrapper
         }
 
         public func description() -> String {
@@ -222,15 +252,19 @@ public extension PTServerManager {
         }
 
         internal init(total: Float, free: Float, buffers: Float, cached: Float, swapTotal: Float, swapFree: Float) {
-            memTotal = total
-            memFree = free
-            memBuffers = buffers
-            memCached = cached
-            self.swapTotal = swapTotal
-            self.swapFree = swapFree
+            memTotal = total.safeWrapper
+            memFree = free.safeWrapper
+            memBuffers = buffers.safeWrapper
+            memCached = cached.safeWrapper
+            self.swapTotal = swapTotal.safeWrapper
+            self.swapFree = swapFree.safeWrapper
             if total != 0 {
-                phyUsed = (total - free - memCached - memBuffers) / total
-                swapUsed = (swapTotal - swapFree) / total
+                phyUsed = (
+                    (total - free - memCached - memBuffers) / total
+                ).safeWrapper
+                swapUsed = (
+                    (swapTotal - swapFree) / total
+                ).safeWrapper
             } else {
                 phyUsed = 0
                 swapUsed = 0
@@ -287,7 +321,9 @@ public extension PTServerManager {
             usedBytes = used
             freeBytes = free
             if (free + used) != 0 {
-                usedPercent = Float(used) / Float(free + used) * 100
+                usedPercent = (
+                    Float(used) / Float(free + used) * 100
+                ).safeWrapper
             } else {
                 usedPercent = 0
             }
@@ -332,9 +368,9 @@ public extension PTServerManager {
             self.hostname = hostname
             self.runningProcs = runningProcs
             self.totalProcs = totalProcs
-            self.load1 = load1
-            self.load5 = load5
-            self.load15 = load15
+            self.load1 = load1.safeWrapper
+            self.load5 = load5.safeWrapper
+            self.load15 = load15.safeWrapper
         }
 
         public func description() -> String {
@@ -588,9 +624,13 @@ public extension PTServerManager {
             }
 
             updatedAt = Int(status?.previousUpdate?.timeIntervalSince1970 ?? 0)
-            cpuThreshold = Double(status?.information?.ServerProcessInfo.summary.sumUsed ?? 0) / 100
-            ramThreshold = Double(status?.information?.ServerMemoryInfo.phyUsed ?? 0)
-            diskThreshold = diskPercent ?? 0
+            cpuThreshold = (
+                Double(status?.information?.ServerProcessInfo.summary.sumUsed ?? 0) / 100
+            ).safeWrapper
+            ramThreshold = (
+                Double(status?.information?.ServerMemoryInfo.phyUsed ?? 0)
+            ).safeWrapper
+            diskThreshold = (diskPercent ?? 0).safeWrapper
         }
     }
 }
