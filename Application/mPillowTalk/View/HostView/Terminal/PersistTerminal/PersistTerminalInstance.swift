@@ -11,6 +11,7 @@ import SwiftTerm
 import SwiftUI
 
 class PersistTerminalInstance: NSObject, Identifiable, TerminalViewDelegate, NMSSHChannelDelegate {
+    
     let id = UUID()
 
     public var terminalTitle = ""
@@ -159,6 +160,10 @@ class PersistTerminalInstance: NSObject, Identifiable, TerminalViewDelegate, NMS
             try? self.session?.channel.write(Data(data))
         }
     }
+    
+    func requestOpenLink(source: TerminalView, link: String, params: [String : String]) {
+        // TODO: MAKE IT WORK
+    }
 
     func scrolled(source _: TerminalView, position _: Double) {}
 
@@ -175,6 +180,7 @@ class PersistTerminalInstance: NSObject, Identifiable, TerminalViewDelegate, NMS
             self?.lock.unlock()
         }
     }
+    
 
     // MARK: NMSSH
 
