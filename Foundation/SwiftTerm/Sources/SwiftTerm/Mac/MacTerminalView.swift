@@ -9,7 +9,7 @@
 //  Created by Miguel de Icaza on 3/4/20.
 //
 
-#if os(OSX)
+#if os(macOS)
 import Foundation
 import AppKit
 import CoreText
@@ -43,7 +43,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations {
         let boldItalic: NSFont
         
         static var defaultFont: NSFont {
-            if #available(OSX 10.15, *)  {
+            if #available(macOS 10.15, *)  {
                 return NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
             } else {
                 return NSFont(name: "Menlo Regular", size: NSFont.systemFontSize) ?? NSFont(name: "Courier", size: NSFont.systemFontSize)!
@@ -99,7 +99,17 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations {
     var colors: [NSColor?] = Array(repeating: nil, count: 256)
     var trueColors: [Attribute.Color:NSColor] = [:]
     var transparent = TTColor.transparent ()
+    var isBigSur = true
     
+    /// This flag is automatically set to true after the initializer is called, if running on a system older than BigSur.
+    /// Starting with BigSur any screen updates will invoke the draw() method with the whole region, regardless
+    /// of how much changed.   Setting this to true, will disable this OS behavior, setting it to false, will keep
+    /// the original BigSur behavior to redraw the whole region.
+    ///
+    /// For more details on this see:
+    /// https://gist.github.com/lukaskubanek/9a61ac71dc0db8bb04db2028f2635779
+    /// https://developer.apple.com/forums/thread/663256?answerId=646653022#646653022
+    public var disableFullRedrawOnAnyChanges = false
     var fontSet: FontSet
 
     /// The font to use to render the terminal
@@ -137,6 +147,10 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations {
     private func setup()
     {
         wantsLayer = true
+        isBigSur = ProcessInfo.processInfo.isOperatingSystemAtLeast(OperatingSystemVersion(majorVersion: 11, minorVersion: 0, patchVersion: 0))
+        if isBigSur {
+            disableFullRedrawOnAnyChanges = true
+        }
         setupScroller()
         setupOptions()
     }
@@ -153,7 +167,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations {
     
     func setupOptions ()
     {
-        setupOptions (width: getEffectiveWidth (rect: bounds), height: bounds.height)
+        setupOptions (width: getEffectiveWidth (size: bounds.size), height: bounds.height)
         layer?.backgroundColor = nativeBackgroundColor.cgColor
     }
 
@@ -281,9 +295,9 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations {
         return NSRect (x: 0, y: 0, width: cellDimension.width * CGFloat(terminal.cols) + scroller.frame.width, height: cellDimension.height * CGFloat(terminal.rows))
     }
     
-    func getEffectiveWidth (rect: NSRect) -> CGFloat
+    func getEffectiveWidth (size: CGSize) -> CGFloat
     {
-        return (rect.width-scroller.frame.width)
+        return (size.width-scroller.frame.width)
     }
     
     open func scrolled(source terminal: Terminal, yDisp: Int) {
@@ -315,6 +329,15 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations {
     
     var userScrolling = false
 
+    override open func viewWillDraw() {
+        
+        // Starting with BigSur, it looks like even sending one pixel to be redrawn will trigger
+        // a call to draw() for the whole surface
+        if disableFullRedrawOnAnyChanges {
+            let layer = self.layer
+            layer?.contentsFormat = .RGBA8Uint
+        }
+    }
     #if false
     override open func setNeedsDisplay(_ invalidRect: NSRect) {
         print ("setNeeds: \(invalidRect)")
@@ -331,8 +354,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations {
         guard let currentContext = getCurrentGraphicsContext() else {
             return
         }
-        
-        drawTerminalContents (dirtyRect: dirtyRect, context: currentContext)
+        drawTerminalContents (dirtyRect: dirtyRect, context: currentContext, offset: 0)
     }
     
     public override func cursorUpdate(with event: NSEvent)
@@ -344,26 +366,15 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations {
     {
         window?.makeFirstResponder (self)
     }
-
+    
     open override var frame: NSRect {
         get {
             return super.frame
         }
         set(newValue) {
             super.frame = newValue
-            
-            let newRows = Int (newValue.height / cellDimension.height)
-            let newCols = Int (getEffectiveWidth (rect: newValue) / cellDimension.width)
-            
-            if newCols != terminal.cols || newRows != terminal.rows {
-                terminal.resize (cols: newCols, rows: newRows)
-                fullBufferUpdate (terminal: terminal)
-            }
-            
-            accessibility.invalidate ()
-            search.invalidate ()
-            
-            terminalDelegate?.sizeChanged (source: self, newCols: newCols, newRows: newRows)
+            guard cellDimension != nil else { return }
+            processSizeChange(newSize: newValue.size)
             needsDisplay = true
         }
     }
@@ -499,7 +510,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations {
         // Handle Option-letter to send the ESC sequence plus the letter as expected by terminals
         if optionAsMetaKey && eventFlags.contains (.option) {
             if let rawCharacter = event.charactersIgnoringModifiers {
-                send (EscapeSequences.CmdEsc)
+                send (EscapeSequences.cmdEsc)
                 send (txt: rawCharacter)
             }
             return
@@ -515,31 +526,31 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations {
                     let c = Int (fs.value)
                     switch c {
                     case NSF1FunctionKey:
-                        send (EscapeSequences.CmdF [0])
+                        send (EscapeSequences.cmdF [0])
                     case NSF2FunctionKey:
-                        send (EscapeSequences.CmdF [1])
+                        send (EscapeSequences.cmdF [1])
                     case NSF3FunctionKey:
-                        send (EscapeSequences.CmdF [2])
+                        send (EscapeSequences.cmdF [2])
                     case NSF4FunctionKey:
-                        send (EscapeSequences.CmdF [3])
+                        send (EscapeSequences.cmdF [3])
                     case NSF5FunctionKey:
-                        send (EscapeSequences.CmdF [4])
+                        send (EscapeSequences.cmdF [4])
                     case NSF6FunctionKey:
-                        send (EscapeSequences.CmdF [5])
+                        send (EscapeSequences.cmdF [5])
                     case NSF7FunctionKey:
-                        send (EscapeSequences.CmdF [6])
+                        send (EscapeSequences.cmdF [6])
                     case NSF8FunctionKey:
-                        send (EscapeSequences.CmdF [7])
+                        send (EscapeSequences.cmdF [7])
                     case NSF9FunctionKey:
-                        send (EscapeSequences.CmdF [8])
+                        send (EscapeSequences.cmdF [8])
                     case NSF10FunctionKey:
-                        send (EscapeSequences.CmdF [9])
+                        send (EscapeSequences.cmdF [9])
                     case NSF11FunctionKey:
-                        send (EscapeSequences.CmdF [10])
+                        send (EscapeSequences.cmdF [10])
                     case NSF12FunctionKey:
-                        send (EscapeSequences.CmdF [11])
+                        send (EscapeSequences.cmdF [11])
                     case NSDeleteFunctionKey:
-                        send (EscapeSequences.CmdDelKey)
+                        send (EscapeSequences.cmdDelKey)
                         //                    case NSUpArrowFunctionKey:
                         //                        send (EscapeSequences.MoveUpNormal)
                         //                    case NSDownArrowFunctionKey:
@@ -566,9 +577,9 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations {
     public override func doCommand(by selector: Selector) {
         switch selector {
         case #selector(insertNewline(_:)):
-            send (EscapeSequences.CmdRet)
+            send (EscapeSequences.cmdRet)
         case #selector(cancelOperation(_:)):
-            send (EscapeSequences.CmdEsc)
+            send (EscapeSequences.cmdEsc)
         case #selector(deleteBackward(_:)):
             send ([backspaceSendsControlH ? 8 : 0x7f])
         case #selector(moveUp(_:)):
@@ -580,18 +591,18 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations {
         case #selector(moveRight(_:)):
             sendKeyRight()
         case #selector(insertTab(_:)):
-            send (EscapeSequences.CmdTab)
+            send (EscapeSequences.cmdTab)
         case #selector(insertBacktab(_:)):
-            send (EscapeSequences.CmdBackTab)
+            send (EscapeSequences.cmdBackTab)
         case #selector(moveToBeginningOfLine(_:)):
-            send (terminal.applicationCursor ? EscapeSequences.MoveHomeApp : EscapeSequences.MoveHomeNormal)
+            send (terminal.applicationCursor ? EscapeSequences.moveHomeApp : EscapeSequences.moveHomeNormal)
         case #selector(moveToEndOfLine(_:)):
-            send (terminal.applicationCursor ? EscapeSequences.MoveEndApp : EscapeSequences.MoveEndNormal)
+            send (terminal.applicationCursor ? EscapeSequences.moveEndApp : EscapeSequences.moveEndNormal)
         case #selector(scrollPageUp(_:)):
             fallthrough
         case #selector(pageUp(_:)):
             if terminal.applicationCursor {
-                send (EscapeSequences.CmdPageUp)
+                send (EscapeSequences.cmdPageUp)
             } else {
                 pageUp()
             }
@@ -599,7 +610,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations {
             fallthrough
         case #selector(pageDown(_:)):
             if terminal.applicationCursor {
-                send (EscapeSequences.CmdPageDown)
+                send (EscapeSequences.cmdPageDown)
             } else {
                 pageDown()
             }
@@ -607,7 +618,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations {
             if terminal.applicationCursor {
                 // TODO: view should scroll one page up.
             } else {
-                send (EscapeSequences.CmdPageDown)
+                send (EscapeSequences.cmdPageDown)
             }
             break;
         default:
@@ -752,25 +763,9 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations {
         clipboard.setString(str, forType: .string)
     }
     
-    /// Set to true if the selection is active, false otherwise
-    public var selectionActive: Bool {
-        get {
-            selection.active
-        }
-    }
-    
-    
-    /// Returns the contents of the selection, if active, or nil otherwise
-    public func getSelection () -> String?
-    {
-        if selection.active {
-            return selection.getSelectedText()
-        }
-        return nil
-    }
     public override func selectAll(_ sender: Any?)
     {
-        selection.selectAll()
+        selectAll ()
     }
     
     //func undo (sender: Any) {}
@@ -947,7 +942,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations {
                 up.sizeToFit()
             } else {
                 let nup: NSTextField
-                if #available(OSX 10.12, *) {
+                if #available(macOS 10.12, *) {
                     nup = NSTextField (string: url)
                 } else {
                     nup = NSTextField ()
@@ -1103,52 +1098,6 @@ extension TerminalView: TerminalDelegate {
     
 }
 
-extension NSColor {
-    func getTerminalColor () -> Color {
-        guard let color = self.usingColorSpace(.deviceRGB) else {
-            return Color.defaultForeground
-        }
-        
-        var red: CGFloat = 0.0, green: CGFloat = 0.0, blue: CGFloat = 0.0, alpha: CGFloat = 1.0
-        color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
-        return Color(red: UInt16(red*65535), green: UInt16(green*65535), blue: UInt16(blue*65535))
-    }
-    func inverseColor() -> NSColor {
-        guard let color = self.usingColorSpace(.deviceRGB) else {
-            return self
-        }
-        
-        var red: CGFloat = 0.0, green: CGFloat = 0.0, blue: CGFloat = 0.0, alpha: CGFloat = 1.0
-        color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
-        return NSColor(calibratedRed: 1.0 - red, green: 1.0 - green, blue: 1.0 - blue, alpha: alpha)
-    }
-
-    static func make (red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) -> NSColor
-    {
-        return NSColor (deviceRed: red, green: green, blue: blue, alpha: alpha)
-    }
-    
-    static func make (hue: CGFloat, saturation: CGFloat, brightness: CGFloat, alpha: CGFloat) -> TTColor
-    {
-        return NSColor (
-            calibratedHue: hue,
-            saturation: saturation,
-            brightness: brightness,
-            alpha: alpha)
-    }
-
-    static func make (color: Color) -> NSColor
-    {
-        return NSColor (deviceRed: CGFloat (color.red) / 65535.0,
-                        green: CGFloat (color.green) / 65535.0,
-                        blue: CGFloat (color.blue) / 65535.0,
-                        alpha: 1.0)
-    }
-    
-    static func transparent () -> NSColor {
-        return NSColor (calibratedWhite: 0, alpha: 0)
-    }    
-}
 
 // Default implementations for TerminalViewDelegate
 
@@ -1167,20 +1116,6 @@ extension TerminalViewDelegate {
     public func bell (source: TerminalView)
     {
         NSSound.beep()
-    }
-}
-
-extension NSBezierPath {
-    func addLine(to: CGPoint)
-    {
-        self.line (to: to)
-    }
-}
-
-extension NSAttributedString {
-    func fuzzyHasSelectionBackground () -> Bool
-    {
-        return attributeKeys.contains(NSAttributedString.Key.selectionBackgroundColor.rawValue)
     }
 }
 #endif

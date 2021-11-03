@@ -43,7 +43,6 @@
 //
 
 #if os(iOS) || os(tvOS)
-
 import Foundation
 import UIKit
 import CoreText
@@ -51,7 +50,7 @@ import CoreGraphics
 
 /// UITextInput Log capability
 internal func uitiLog (_ message: String) {
-    print (message)
+    //print (message)
 }
 
 extension TerminalView: UITextInput {
@@ -217,12 +216,13 @@ extension TerminalView: UITextInput {
     }
     
     public func compare(_ position: UITextPosition, to other: UITextPosition) -> ComparisonResult {
-        let first = position as! xTextPosition
-        let second = other as! xTextPosition
-        if first.start < second.start {
-            return .orderedAscending
-        } else if first.start == second.start {
-            return .orderedSame
+        if let first = position as? xTextPosition,
+           let second = other as? xTextPosition {
+            if first.start < second.start {
+                return .orderedAscending
+            } else if first.start == second.start {
+                return .orderedSame
+            }
         }
         return .orderedDescending
     }
@@ -419,5 +419,4 @@ class xTextRange: UITextRange {
         }
     }
 }
-
 #endif

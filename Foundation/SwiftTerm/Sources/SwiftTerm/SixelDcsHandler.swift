@@ -5,13 +5,6 @@
 //
 
 import Foundation
-import CoreGraphics
-#if os(iOS) || os(tvOS)
-import UIKit
-#endif
-#if os(macOS)
-import AppKit
-#endif
 
 // DCS handler for sixel sequences, collects the image and
 // then calls into the front-end to attach the parsed image

@@ -26,6 +26,6 @@ let package = Package(
         .target(
             name: "PTFoundation",
             dependencies: ["NMSSH", "SQLite"]
-        )
+        ),
     ]
 )

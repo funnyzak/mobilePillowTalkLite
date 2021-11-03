@@ -110,6 +110,27 @@ extension TerminalView {
         return terminal
     }
     
+    /// This function computes the new columns and rows for the terminal when a pixel-size changes
+    /// Returns true if this changed the number of columns/rows, false otherwise
+    @discardableResult
+    func processSizeChange (newSize: CGSize) -> Bool {
+        let newRows = Int (newSize.height / cellDimension.height)
+        let newCols = Int (getEffectiveWidth (size: newSize) / cellDimension.width)
+        
+        if newCols != terminal.cols || newRows != terminal.rows {
+            terminal.resize (cols: newCols, rows: newRows)
+            fullBufferUpdate (terminal: terminal)
+            
+            // These used to be outside
+            accessibility.invalidate ()
+            search.invalidate ()
+            
+            terminalDelegate?.sizeChanged (source: self, newCols: newCols, newRows: newRows)
+            return true
+        }
+        return false
+    }
+
     //
     // Updates the contents of the NSAttributedString buffer from the contents of the terminal.buffer character array
     //
@@ -134,7 +155,6 @@ extension TerminalView {
             attrStrBuffer.maxLength = terminal.buffer.lines.maxLength
         }
         
-        #if os(macOS)
         // This does not compile on iOS, due to
         // this not existing: attributedString.attributeKeys
         
@@ -144,7 +164,7 @@ extension TerminalView {
             
             if selection.hasSelectionRange == false {
                 // This optimization only works on Mac, hence the fuzzy, it is always true on iOS
-                if attributedString.fuzzyHasSelectionBackground() {
+                if attributedString.fuzzyHasSelectionBackground(true) {
                     let updatedString = NSMutableAttributedString(attributedString: attributedString)
                     updatedString.removeAttribute(.selectionBackgroundColor)
                     attrStrBuffer [row].attrStr = updatedString
@@ -153,7 +173,7 @@ extension TerminalView {
             
             if selection.hasSelectionRange == true {
                 // This optimization only works on Mac, hence the fuzzy, it is always true on iOS
-                if !attributedString.fuzzyHasSelectionBackground() {
+                if !attributedString.fuzzyHasSelectionBackground(false) {
                     let updatedString = NSMutableAttributedString(attributedString: attributedString)
                     updatedString.removeAttribute(.selectionBackgroundColor)
                     updateSelectionAttributesIfNeeded(attributedLine: updatedString, row: row, cols: cols)
@@ -161,7 +181,6 @@ extension TerminalView {
                 }
             }
         }
-        #endif
     }
     
     func makeEmptyLine (_ index: Int) -> ViewLineInfo
@@ -503,15 +522,30 @@ extension TerminalView {
 
     
     // TODO: this should not render any lines outside the dirtyRect
-    func drawTerminalContents (dirtyRect: TTRect, context: CGContext)
+    func drawTerminalContents (dirtyRect: TTRect, context: CGContext, offset: CGFloat)
     {
         let lineDescent = CTFontGetDescent(fontSet.normal)
         let lineLeading = CTFontGetLeading(fontSet.normal)
-        
+
         // draw lines
         for row in terminal.buffer.yDisp..<terminal.rows + terminal.buffer.yDisp {
-            let lineOffset = cellDimension.height * (CGFloat(row - terminal.buffer.yDisp + 1))
+            let lineOffset = cellDimension.height * (CGFloat(row - terminal.buffer.yDisp + 1)) + offset
             let lineOrigin = CGPoint(x: 0, y: frame.height - lineOffset)
+            
+            #if false
+            // This optimization is useful, but only if we can get proper exposed regions
+            // and while it works most of the time with the BigSur change, there is still
+            // a case where we just get full exposes despite requesting only a line
+            // repro: fill 300 lines, then clear screen then repeatedly output commands
+            // that produce 3-5 lines of text: while we send AppKit the right boundary,
+            // AppKit still send everything.  
+            let lineRect = CGRect (origin: lineOrigin, size: CGSize (width: dirtyRect.width, height: cellDimension.height))
+            
+            if !lineRect.intersects(dirtyRect) {
+                //print ("Skipping row \(row) because it does nto intersect")
+                continue
+            } 
+            #endif
             let ctline = CTLineCreateWithAttributedString(attrStrBuffer [row].attrStr)
 
             var col = 0
@@ -589,6 +623,55 @@ extension TerminalView {
 
                 col += runGlyphsCount
             }
+            
+            #if os(iOS)
+            if selection.active {
+                let start, end: Position
+
+                func drawSelectionHandle (drawStart: Bool, y: CGFloat) {
+                    context.saveGState ()
+                    let start = CGPoint (
+                        x: CGFloat (drawStart ? start.col : end.col) * cellDimension.width,
+                        y: lineOrigin.y)
+                    let end = CGPoint(x: start.x, y: start.y + cellDimension.height)
+                    
+                    context.move(to: end)
+                    context.addLine(to: start)
+                    let size = 6.0
+                    let location = drawStart ? end : start
+                    
+                    let rect = CGRect (origin:
+                                        CGPoint (x: location.x-(size/2.0),
+                                                 y: location.y - (drawStart ? 0.0 : size)),
+                                       size: CGSize (width: size, height: size))
+                    context.addEllipse(in: rect)
+                    context.closePath()
+                    context.setLineWidth(2)
+                    selectionHandleColor.set ()
+                    //TTColor.systemBlue.set ()
+                    context.drawPath(using: .fillStroke)
+                    context.restoreGState()
+                }
+                
+                // Normalize the selection start/end, regardless of where it started
+                let sstart = selection.start
+                let send = selection.end
+                if Position.compare (sstart, send) == .before {
+                    start = sstart
+                    end = send
+                } else {
+                    start = send
+                    end = sstart
+                }
+                
+                if start.row == row {
+                    drawSelectionHandle (drawStart: true, y: lineOrigin.y)
+                }
+                if end.row == row {
+                    drawSelectionHandle (drawStart: false, y: lineOrigin.y)
+                }
+            }
+            #endif
 
             // Render any sixel content last
             if let images = attrStrBuffer [row].images {
@@ -607,7 +690,23 @@ extension TerminalView {
                 }
             }
         }
+
+#if false
+        UIColor.red.set ()
+        context.setLineWidth(3)
+        context.move(to: CGPoint(x: 100, y: 100 ))
+        context.addLine(to: CGPoint (x: 300, y: 300))
+        context.strokePath()
+
+        // Draws a box around the received affected area
+        NSColor.red.set ()
+        context.setLineWidth(3)
+        context.move(to: dirtyRect.origin)
+        context.addLine(to: CGPoint (x: dirtyRect.maxX, y: dirtyRect.maxY))
+        context.strokePath()
+        #endif
     }
+    
     
     /// Update visible area
     func updateDisplay (notifyAccessibility: Bool)
@@ -642,7 +741,6 @@ extension TerminalView {
             let oy = region.origin.y
             region = CGRect (x: 0, y: 0, width: frame.width, height: oh + oy)
         }
-        //print ("Region: \(region)")
         setNeedsDisplay(region)
         #else
         // TODO iOS: need to update the code above, but will do that when I get some real
@@ -672,7 +770,7 @@ extension TerminalView {
         if vy >= buffer.yDisp + buffer.rows {
             caretView.removeFromSuperview()
             return
-        } else if terminal.cursorHidden == false {
+        } else if terminal.cursorHidden == false && caretView.superview != self {
             addSubview(caretView)
         }
         
@@ -847,13 +945,21 @@ extension TerminalView {
     /// Scrolls the content of the terminal one page up
     public func pageUp()
     {
-        scrollUp (lines: terminal.rows)
+        if terminal.buffers.isAlternateBuffer {
+            send (EscapeSequences.cmdPageUp)
+        } else {
+            scrollUp (lines: terminal.rows)
+        }
     }
     
     /// Scrolls the content of the terminal one page down
     public func pageDown ()
     {
-        scrollDown (lines: terminal.rows)
+        if terminal.buffers.isAlternateBuffer {
+            send (EscapeSequences.cmdPageDown)
+        } else {
+            scrollDown (lines: terminal.rows)
+        }
     }
     
     /// Scrolls up the content of the terminal the specified number of lines
@@ -952,22 +1058,22 @@ extension TerminalView {
 
     func sendKeyUp ()
     {
-        send (terminal.applicationCursor ? EscapeSequences.MoveUpApp : EscapeSequences.MoveUpNormal)
+        send (terminal.applicationCursor ? EscapeSequences.moveUpApp : EscapeSequences.moveUpNormal)
     }
     
     func sendKeyDown ()
     {
-        send (terminal.applicationCursor ? EscapeSequences.MoveDownApp : EscapeSequences.MoveDownNormal)
+        send (terminal.applicationCursor ? EscapeSequences.moveDownApp : EscapeSequences.moveDownNormal)
     }
     
     func sendKeyLeft()
     {
-        send (terminal.applicationCursor ? EscapeSequences.MoveLeftApp : EscapeSequences.MoveLeftNormal)
+        send (terminal.applicationCursor ? EscapeSequences.moveLeftApp : EscapeSequences.moveLeftNormal)
     }
     
     func sendKeyRight ()
     {
-        send (terminal.applicationCursor ? EscapeSequences.MoveRightApp : EscapeSequences.MoveRightNormal)
+        send (terminal.applicationCursor ? EscapeSequences.moveRightApp : EscapeSequences.moveRightNormal)
     }
     
     class AppleImage: TerminalImage {
@@ -1091,5 +1197,33 @@ extension TerminalView {
             buffer.x = savedX
         }
     }
+    
+    /// Set to true if the selection is active, false otherwise
+    public var selectionActive: Bool {
+        get {
+            selection.active
+        }
+    }
+    
+    
+    /// Returns the contents of the selection, if active, or nil otherwise
+    public func getSelection () -> String?
+    {
+        if selection.active {
+            return selection.getSelectedText()
+        }
+        return nil
+    }
+    
+    /// Selects the entire buffer
+    public func selectAll () {
+        selection.selectAll()
+    }
+    
+    /// Clears the selection
+    public func selectNone () {
+        selection.selectNone()
+    }
+    
 }
 #endif

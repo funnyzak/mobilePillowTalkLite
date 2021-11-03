@@ -56,6 +56,6 @@ public protocol TerminalViewDelegate: AnyObject {
     /**
      * This method will be invoked when the host beeps.
      */
-    func bell (source: TerminalView)
+    func bell (source: TerminalView)    
 }
 #endif

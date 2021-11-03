@@ -1,4 +1,4 @@
-// swift-tools-version:5.3
+// swift-tools-version:5.1
 
 import PackageDescription
 
@@ -6,7 +6,7 @@ let package = Package(
     name: "SwiftTerm",
     platforms: [
         .iOS(.v13),
-        .macOS(.v10_12),
+        .macOS(.v10_15),
         .tvOS(.v13)
     ],
     products: [
@@ -28,6 +28,6 @@ let package = Package(
             name: "SwiftTermFuzz",
             dependencies: ["SwiftTerm"],
             path: "Sources/SwiftTermFuzz"
-        )
+        ),
     ]
 )
